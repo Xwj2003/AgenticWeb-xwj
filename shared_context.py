@@ -2,6 +2,11 @@
 SharedContext:Agent 之间共享数据的"黑板"。
 所有 Agent 读写的中间产物都在这里集中管理,且每次写入都会落盘,
 方便事后审计、断点续跑、人工修改。
+
+v2.1 变更:
+  - 新增 user_feedback 字段,存储 HITL 节点收集到的用户反馈文本。
+  - summary_for() 在重生成轮次中自动将对应 Agent 的反馈注入 prompt,
+    保证 Agent 能看到"用户不满意什么、要怎么改"。
 """
 import os
 import json
@@ -21,15 +26,20 @@ class AgentLog:
 
 class SharedContext:
     """
-    共享上下文。字段含义:
-    - requirement: 用户原始一句话需求
-    - prd: 产品需求文档(PM 产出)
-    - architecture: 技术方案 + API 契约(Architect 产出)
-    - backend_files: dict[相对路径, 文件内容](Backend 产出)
-    - frontend_files: dict[相对路径, 文件内容](Frontend 产出)
-    - devops_files: dict[相对路径, 文件内容](DevOps 产出)
-    - qa_report: 质检报告(QA 产出)
-    - history: 全部 Agent 活动日志
+    共享上下文(黑板)。字段含义:
+    - requirement     : 用户原始一句话需求
+    - prd             : 产品需求文档(PM 产出)
+    - architecture    : 技术方案 + API 契约(Architect 产出)
+    - backend_files   : dict[相对路径, 文件内容](Backend 产出)
+    - frontend_files  : dict[相对路径, 文件内容](Frontend 产出)
+    - devops_files    : dict[相对路径, 文件内容](DevOps 产出)
+    - qa_report       : 质检报告(QA 产出)
+    - qa_failures     : 上一轮 QA 未通过的 check 列表(修复轮专用,用完即清空)
+    - user_feedback   : HITL 收集到的用户反馈 {agent_name: feedback_text}
+                        支持键: "ProductManager"、"Architect"
+                        由 orchestrator 在 FEEDBACK 动作后写入;
+                        summary_for() 在对应 Agent 的重生成请求中自动注入。
+    - history         : 全部 Agent 活动日志
     """
 
     def __init__(self, requirement: str, output_dir: str):
@@ -48,6 +58,14 @@ class SharedContext:
         # 修复轮次专用:存放上一轮 QA 未通过的 check 列表,
         # summary_for() 会把它们注入进 prompt,让 Agent 定向修复
         self.qa_failures: list = []
+
+        # HITL 反馈:键为 Agent.name,值为用户在 HITL 节点输入的自然语言反馈。
+        # orchestrator 在用户选择"提供反馈重生成"后写入,
+        # summary_for() 在该 Agent 的下一次运行中自动注入。
+        # 键名与各 Agent 类的 name 属性严格一致:
+        #   "ProductManager"  ← ProductManagerAgent.name
+        #   "Architect"       ← ArchitectAgent.name
+        self.user_feedback: dict = {}
 
         self.history: list[AgentLog] = []
 
@@ -105,14 +123,42 @@ class SharedContext:
 
     # ---- 摘要(给下游 Agent 当 prompt 输入) ----
     def summary_for(self, agent_name: str) -> str:
-        """根据下游 Agent 的需要,只暴露它需要看到的上下文字段"""
-        parts = [f"# 用户原始需求\n{self.requirement}\n"]
-        if self.prd:
-            parts.append(f"# PRD (产品需求文档)\n```json\n{json.dumps(self.prd, ensure_ascii=False, indent=2)}\n```\n")
-        if self.architecture:
-            parts.append(f"# 技术架构方案\n```json\n{json.dumps(self.architecture, ensure_ascii=False, indent=2)}\n```\n")
+        """
+        根据下游 Agent 的需要,只暴露它该看到的上下文字段。
 
-        # 修复轮次:把上一轮 QA 失败项注入 prompt,要求 Agent 逐一修复
+        注入优先级(从高到低):
+          1. 用户原始需求           —— 所有 Agent 可见
+          2. PRD                    —— 架构师及以后可见
+          3. 技术架构方案           —— 后端/前端/DevOps/QA 可见
+          4. 用户反馈(HITL)         —— 仅注入给被重新审核的 Agent
+                                       (ProductManager / Architect)
+          5. QA 失败项清单          —— 仅在修复轮次中注入
+        """
+        parts = [f"# 用户原始需求\n{self.requirement}\n"]
+
+        if self.prd:
+            parts.append(
+                f"# PRD (产品需求文档)\n"
+                f"```json\n{json.dumps(self.prd, ensure_ascii=False, indent=2)}\n```\n"
+            )
+
+        if self.architecture:
+            parts.append(
+                f"# 技术架构方案\n"
+                f"```json\n{json.dumps(self.architecture, ensure_ascii=False, indent=2)}\n```\n"
+            )
+
+        # ── HITL 用户反馈(仅注入给当前被重生成的 Agent) ──────────────────
+        # user_feedback 键与 Agent.name 严格对应,其他 Agent 不会误读。
+        agent_fb = self.user_feedback.get(agent_name, "").strip()
+        if agent_fb:
+            parts.append(
+                f"# 🗣️ 用户对你上一版本产物的反馈(必须据此改进)\n"
+                f"{agent_fb}\n\n"
+                f"请仔细阅读以上反馈,确保本次输出完整回应每一条意见,不要遗漏。"
+            )
+
+        # ── QA 修复轮次:失败项清单 ──────────────────────────────────────
         if self.qa_failures:
             failures_text = "\n".join(
                 f"  - [{c['name']}]: {c['detail']}"
@@ -124,5 +170,4 @@ class SharedContext:
                 f"请仔细阅读以上失败项,确保你的输出完整解决每一条问题,不要遗漏任何接口或文件。"
             )
 
-        # 后端/前端 agent 可能需要彼此的接口契约,这部分已在 architecture 中
         return "\n".join(parts)
