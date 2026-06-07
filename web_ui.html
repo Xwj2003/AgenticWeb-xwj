@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>全栈 Agent 团队</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --text: #1a1d23;
+      --muted: #6b7280;
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --danger: #dc2626;
+      --ok: #16a34a;
+      --border: #e5e7eb;
+      --radius: 10px;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+    
+    [data-theme="dark"] {
+      --bg: #0f1115;
+      --surface: #1a1d23;
+      --text: #e6e8eb;
+      --muted: #9aa1ad;
+      --primary: #6366f1;
+      --primary-hover: #818cf8;
+      --danger: #f87171;
+      --ok: #4ade80;
+      --border: #2a2f37;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+    
+    * { box-sizing: border-box; }
+    
+    body {
+      margin: 0;
+      font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      transition: background 0.2s, color 0.2s;
+    }
+    
+    .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+    
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    h1 { margin: 0; font-size: 1.6rem; font-weight: 700; }
+    
+    .theme-toggle {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 1.1rem;
+      transition: background 0.15s;
+    }
+    
+    .theme-toggle:hover { background: var(--bg); }
+    
+    .main { display: grid; grid-template-columns: 1fr 350px; gap: 20px; }
+    
+    @media (max-width: 768px) {
+      .main { grid-template-columns: 1fr; }
+    }
+    
+    .section { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
+    
+    .section-title { font-size: 1.1rem; font-weight: 600; margin: 0 0 15px 0; }
+    
+    textarea {
+      font: inherit;
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      resize: vertical;
+      min-height: 100px;
+    }
+    
+    textarea:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+    
+    .btn {
+      font: inherit;
+      cursor: pointer;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      padding: 10px 18px;
+      background: var(--primary);
+      color: #fff;
+      transition: background 0.15s;
+      margin-top: 12px;
+      width: 100%;
+      font-weight: 600;
+    }
+    
+    .btn:hover { background: var(--primary-hover); }
+    .btn:active { transform: translateY(1px); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    
+    .btn.secondary {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    
+    .btn.secondary:hover { background: var(--bg); }
+    
+    .btn.danger {
+      background: var(--danger);
+    }
+    
+    .btn.danger:hover { background: #b91c1c; }
+    
+    /* 流水线进度 */
+    .pipeline {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    
+    .stage {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      transition: background 0.2s;
+    }
+    
+    .stage.active { background: var(--primary); color: #fff; }
+    .stage.completed { background: var(--ok); color: #fff; }
+    .stage.error { background: var(--danger); color: #fff; }
+    
+    .stage-icon {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+    
+    .stage-name { font-weight: 600; flex: 1; }
+    
+    /* 日志 */
+    .logs {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      height: 300px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    
+    .log-entry {
+      margin-bottom: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+    }
+    
+    .log-entry.info { color: var(--muted); }
+    .log-entry.success { color: var(--ok); }
+    .log-entry.warning { color: #d97706; }
+    .log-entry.error { color: var(--danger); }
+    
+    .log-time {
+      color: var(--muted);
+      font-size: 0.75rem;
+      margin-right: 8px;
+    }
+    
+    /* 审核弹窗 */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .modal.show { display: flex; }
+    
+    .modal-content {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 24px;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 25px rgba(0, 0, 0, 0.15);
+    }
+    
+    .modal-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 15px; }
+    
+    .modal-body {
+      margin-bottom: 20px;
+      background: var(--bg);
+      padding: 15px;
+      border-radius: var(--radius);
+      overflow-x: auto;
+    }
+    
+    .modal-body pre {
+      margin: 0;
+      font-size: 0.85rem;
+      overflow-x: auto;
+    }
+    
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    
+    .modal-actions .btn { flex: 1; min-width: 120px; margin-top: 0; }
+    
+    .feedback-input {
+      font: inherit;
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      min-height: 80px;
+      resize: vertical;
+      margin: 15px 0;
+    }
+    
+    /* 完成状态 */
+    .completion {
+      text-align: center;
+      padding: 30px 20px;
+    }
+    
+    .completion-icon { font-size: 3rem; margin-bottom: 15px; }
+    
+    .info-box {
+      background: var(--bg);
+      padding: 15px;
+      border-radius: var(--radius);
+      margin: 15px 0;
+      border-left: 4px solid var(--primary);
+    }
+    
+    .info-box.error { border-left-color: var(--danger); }
+    
+    code {
+      background: var(--bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🤖 全栈 Agent 团队</h1>
+  <button class='theme-toggle' id='theme'>🌙</button>
+</header>
+
+<div class='container'>
+  <div class='main'>
+    
+    <!-- 左侧:输入 + 进度 + 日志 -->
+    <div>
+      
+      <!-- 需求输入 -->
+      <div class='section' id='inputSection'>
+        <div class='section-title'>📝 输入需求</div>
+        <textarea id='requirement' placeholder='描述你的需求,比如:"帮我做一个待办事项 Web 应用,要登录、CRUD、深色模式"'></textarea>
+        <button class='btn' id='startBtn'>启动流水线</button>
+      </div>
+      
+      <!-- 流水线进度 -->
+      <div class='section' id='progressSection' style='display: none;'>
+        <div class='section-title'>🚀 执行进度</div>
+        <div class='pipeline' id='pipeline'></div>
+      </div>
+      
+      <!-- 实时日志 -->
+      <div class='section' id='logsSection' style='display: none;'>
+        <div class='section-title'>📋 实时日志</div>
+        <div class='logs' id='logs'></div>
+      </div>
+      
+      <!-- 完成状态 -->
+      <div class='section' id='completionSection' style='display: none;'>
+        <div class='completion'>
+          <div class='completion-icon' id='completionIcon'></div>
+          <h2 id='completionTitle'></h2>
+          <div id='completionMessage'></div>
+        </div>
+      </div>
+      
+    </div>
+    
+    <!-- 右侧:统计信息 -->
+    <div>
+      <div class='section'>
+        <div class='section-title'>📊 状态</div>
+        <div id='statusInfo' style='font-size: 0.95rem; line-height: 2;'>
+          <div><strong>当前状态:</strong> <span id='statusValue'>待输入</span></div>
+          <div><strong>当前阶段:</strong> <span id='stageValue'>-</span></div>
+          <div><strong>日志条数:</strong> <span id='logCount'>0</span></div>
+        </div>
+      </div>
+      
+      <div class='section' style='margin-top: 20px;'>
+        <div class='section-title'>ℹ️ 说明</div>
+        <div style='font-size: 0.9rem; color: var(--muted); line-height: 1.8;'>
+          <p>输入需求后,AI Agent 团队会自动:</p>
+          <ul style='margin: 8px 0; padding-left: 20px;'>
+            <li>产品经理拆解需求</li>
+            <li>架构师设计技术方案</li>
+            <li>后端/前端工程师编码</li>
+            <li>DevOps 产出交付文件</li>
+            <li>QA 工程师检查质量</li>
+          </ul>
+          <p>预计 3-8 分钟完成。</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 审核弹窗 -->
+<div class='modal' id='reviewModal'>
+  <div class='modal-content'>
+    <div class='modal-title' id='reviewTitle'></div>
+    <div class='modal-body' id='reviewBody'></div>
+    <textarea class='feedback-input' id='feedbackText' placeholder='如果选择"提供反馈",请在这里输入改进意见...' style='display: none;'></textarea>
+    <div class='modal-actions' id='reviewActions'></div>
+  </div>
+</div>
+
+<script>
+const apiBase = '/api';
+let eventSource = null;
+let pipelineStages = [
+  { name: 'ProductManager', title: '产品经理', icon: '🔍' },
+  { name: 'Architect', title: '架构师', icon: '📐' },
+  { name: 'Backend', title: '后端工程师', icon: '⚙️' },
+  { name: 'Frontend', title: '前端工程师', icon: '🎨' },
+  { name: 'DevOps', title: '运维工程师', icon: '📦' },
+  { name: 'QA', title: 'QA 工程师', icon: '✅' },
+];
+
+// ═══════════════════════════════════════════════════════════════
+// 主要事件处理
+// ═══════════════════════════════════════════════════════════════
+
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const requirement = document.getElementById('requirement').value.trim();
+  if (!requirement) {
+    alert('请输入需求');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${apiBase}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requirement, interactive: true }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      alert('启动失败: ' + (err.error || res.statusText));
+      return;
+    }
+
+    _transitionToRunning();
+    _startLogStream();
+    _startStatusPolling();
+
+  } catch (e) {
+    alert('网络错误: ' + e.message);
+  }
+});
+
+document.getElementById('theme').addEventListener('click', () => {
+  const html = document.documentElement;
+  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  document.getElementById('theme').textContent = next === 'dark' ? '☀️' : '🌙';
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 业务逻辑
+// ═══════════════════════════════════════════════════════════════
+
+function _transitionToRunning() {
+  document.getElementById('inputSection').style.display = 'none';
+  document.getElementById('progressSection').style.display = 'block';
+  document.getElementById('logsSection').style.display = 'block';
+
+  // 初始化流水线进度
+  const pipeline = document.getElementById('pipeline');
+  pipeline.innerHTML = pipelineStages
+    .map(s => `<div class='stage' data-stage='${s.name}'>
+      <div class='stage-icon'>${s.icon}</div>
+      <div class='stage-name'>${s.title}</div>
+    </div>`)
+    .join('');
+}
+
+function _startLogStream() {
+  if (eventSource) eventSource.close();
+
+  eventSource = new EventSource(`${apiBase}/logs`);
+
+  eventSource.onmessage = (e) => {
+    try {
+      const log = JSON.parse(e.data);
+
+      if (log.type === 'final') {
+        eventSource.close();
+        _handleCompletion(log.status);
+        return;
+      }
+
+      // 更新流水线进度
+      if (log.stage && log.stage !== '-') {
+        pipelineStages.forEach(s => {
+          const el = document.querySelector(`[data-stage='${s.name}']`);
+          if (!el) return;
+          el.classList.remove('active', 'completed', 'error');
+          if (s.name === log.stage) {
+            el.classList.add(log.level === 'error' ? 'error' : 'active');
+          } else if (pipelineStages.indexOf(s) < pipelineStages.indexOf(pipelineStages.find(x => x.name === log.stage))) {
+            el.classList.add('completed');
+          }
+        });
+      }
+
+      // 添加日志条目
+      const logsEl = document.getElementById('logs');
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${log.level || 'info'}`;
+      const time = new Date(log.timestamp * 1000).toLocaleTimeString();
+      entry.innerHTML = `<span class='log-time'>[${time}]</span>${escapeHtml(log.message || '')}`;
+      logsEl.appendChild(entry);
+      logsEl.scrollTop = logsEl.scrollHeight;
+
+      // 更新统计
+      document.getElementById('logCount').textContent = logsEl.children.length;
+
+    } catch (e) {
+      console.error('日志解析失败:', e);
+    }
+  };
+
+  eventSource.onerror = () => {
+    console.error('日志连接中断');
+    eventSource.close();
+  };
+}
+
+function _startStatusPolling() {
+  const interval = setInterval(async () => {
+    try {
+      const res = await fetch(`${apiBase}/status`);
+      const data = await res.json();
+
+      document.getElementById('statusValue').textContent = data.status;
+      document.getElementById('stageValue').textContent = data.current_stage || '-';
+
+      // 如果有待审核,打开审核弹窗
+      if (data.review_pending && data.review_type) {
+        clearInterval(interval);
+        _showReviewModal(data.review_type, data.review_data);
+      }
+
+      // 如果完成,停止轮询
+      if (data.status === 'completed' || data.status === 'error') {
+        clearInterval(interval);
+      }
+
+    } catch (e) {
+      console.error('状态查询失败:', e);
+    }
+  }, 1000);
+}
+
+function _handleCompletion(status) {
+  document.getElementById('progressSection').style.display = 'none';
+  document.getElementById('logsSection').style.display = 'none';
+  document.getElementById('completionSection').style.display = 'block';
+
+  const icon = document.getElementById('completionIcon');
+  const title = document.getElementById('completionTitle');
+  const msg = document.getElementById('completionMessage');
+
+  if (status === 'completed') {
+    icon.textContent = '✅';
+    title.textContent = '流水线完成!';
+    msg.innerHTML = `<div class='info-box'><p>项目已生成,请进入项目目录运行:</p>
+      <code>npm install && npm start</code></div>`;
+  } else {
+    icon.textContent = '❌';
+    title.textContent = '流水线错误';
+    msg.innerHTML = `<div class='info-box error'><p>执行中出现错误,请检查日志。</p></div>`;
+  }
+}
+
+function _showReviewModal(reviewType, data) {
+  const modal = document.getElementById('reviewModal');
+  const title = document.getElementById('reviewTitle');
+  const body = document.getElementById('reviewBody');
+  const actions = document.getElementById('reviewActions');
+  const feedback = document.getElementById('feedbackText');
+
+  // 类型标题和说明
+  const typeMap = {
+    'prd': { icon: '📄', title: 'PRD 审核', desc: '产品经理已生成产品需求文档,请审核。' },
+    'architecture': { icon: '📐', title: '架构审核', desc: '架构师已设计技术方案,请审核。' },
+    'qa': { icon: '🔍', title: 'QA 审核', desc: '质检完毕,请决定是否强制通过。' },
+  };
+
+  const info = typeMap[reviewType] || typeMap['prd'];
+  title.textContent = info.icon + ' ' + info.title;
+
+  body.innerHTML = `<p>${info.desc}</p>
+    <pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+  feedback.style.display = reviewType === 'qa' ? 'none' : 'block';
+  feedback.value = '';  // 清空之前的内容
+
+  // 审核按钮
+  actions.innerHTML = '';
+
+  if (reviewType === 'qa') {
+    // QA 审核:批准 / 继续修复 / 中止
+    actions.appendChild(_createBtn('批准通过', 'approve', () => _submitReview('approve')));
+    actions.appendChild(_createBtn('继续修复', 'secondary', () => _submitReview('continue')));
+    actions.appendChild(_createBtn('中止', 'danger', () => _submitReview('abort')));
+  } else {
+    // PRD / 架构审核:批准 / 提供反馈 / 中止
+    const approveBtnEl = _createBtn('批准', 'approve', () => _submitReview('approve'));
+    const feedbackBtnEl = _createBtn('提供反馈', 'secondary', _switchToFeedbackMode);
+    const abortBtnEl = _createBtn('中止', 'danger', () => _submitReview('abort'));
+
+    approveBtnEl.id = 'approveBtn';
+    feedbackBtnEl.id = 'feedbackBtn';
+    abortBtnEl.id = 'abortBtn';
+
+    actions.appendChild(approveBtnEl);
+    actions.appendChild(feedbackBtnEl);
+    actions.appendChild(abortBtnEl);
+
+    // 反馈模式的按钮(初始隐藏)
+    const submitFeedbackBtnEl = _createBtn('提交反馈并继续', 'approve', () => _submitReview('feedback'));
+    const cancelFeedbackBtnEl = _createBtn('返回', 'secondary', _switchToNormalMode);
+
+    submitFeedbackBtnEl.id = 'submitFeedbackBtn';
+    submitFeedbackBtnEl.style.display = 'none';
+    cancelFeedbackBtnEl.id = 'cancelFeedbackBtn';
+    cancelFeedbackBtnEl.style.display = 'none';
+
+    actions.appendChild(submitFeedbackBtnEl);
+    actions.appendChild(cancelFeedbackBtnEl);
+  }
+
+  modal.classList.add('show');
+}
+
+function _switchToFeedbackMode() {
+  // 隐藏原始按钮,显示提交反馈按钮
+  document.getElementById('approveBtn').style.display = 'none';
+  document.getElementById('feedbackBtn').style.display = 'none';
+  document.getElementById('abortBtn').style.display = 'none';
+  document.getElementById('submitFeedbackBtn').style.display = '';
+  document.getElementById('cancelFeedbackBtn').style.display = '';
+  document.getElementById('feedbackText').focus();
+}
+
+function _switchToNormalMode() {
+  // 显示原始按钮,隐藏提交反馈按钮
+  document.getElementById('approveBtn').style.display = '';
+  document.getElementById('feedbackBtn').style.display = '';
+  document.getElementById('abortBtn').style.display = '';
+  document.getElementById('submitFeedbackBtn').style.display = 'none';
+  document.getElementById('cancelFeedbackBtn').style.display = 'none';
+  document.getElementById('feedbackText').value = '';
+}
+
+function _createBtn(text, className, onclick) {
+  const btn = document.createElement('button');
+  btn.className = 'btn ' + className;
+  btn.textContent = text;
+  if (onclick) btn.addEventListener('click', onclick);
+  return btn;
+}
+
+async function _submitReview(action) {
+  const feedback = document.getElementById('feedbackText').value.trim();
+
+  try {
+    const res = await fetch(`${apiBase}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, feedback }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      alert('提交失败: ' + (err.error || res.statusText));
+      return;
+    }
+
+    // 关闭弹窗,继续轮询状态
+    document.getElementById('reviewModal').classList.remove('show');
+    _startStatusPolling();
+
+  } catch (e) {
+    alert('网络错误: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 工具函数
+// ═══════════════════════════════════════════════════════════════
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = (s == null ? '' : String(s));
+  return div.innerHTML;
+}
+
+// 初始化主题
+(function initTheme() {
+  const theme = localStorage.getItem('theme') || 'light';
+  document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('theme').textContent = theme === 'dark' ? '☀️' : '🌙';
+})();
+
+</script>
+
+</body>
+</html>
