@@ -1,143 +1,113 @@
-document.addEventListener('DOMContentLoaded', () => {
-    loadTodos();
-    document.getElementById('toggle-dark-mode').addEventListener('click', toggleDarkMode);
-    document.getElementById('add-task-form').addEventListener('submit', addTask);
+// >>> SKELETON START
+const state = { items: [] };
+const listEl = document.querySelector('#list');
+const formEl = document.querySelector('#form');
+const themeBtn = document.querySelector('#theme');
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = (s == null ? '' : String(s));
+  return d.innerHTML;
+}
+
+function toast(msg) {
+  const t = document.querySelector('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function () { t.classList.remove('show'); }, 2500);
+}
+
+async function api(path, options) {
+  const res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options || {}));
+  if (!res.ok) {
+    let m = res.statusText;
+    try { m = (await res.json()).error || m; } catch (e) {}
+    throw new Error(m);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function render() {
+  listEl.innerHTML = '';
+  if (state.items.length === 0) {
+    listEl.innerHTML = `<li class='empty'>还没有任务</li>`;
+    return;
+  }
+  for (const it of state.items) {
+    const li = document.createElement('li');
+    li.className = 'list-item';
+    li.dataset.id = it.id;
+    li.innerHTML = `
+      <div class='info'>
+        <span>${escapeHtml(it.title)}</span>
+        <span class='muted'>${it.completed ? '已完成' : '未完成'}</span>
+      </div>
+      <span class='row'>
+        <button class='secondary' data-action='edit'>编辑</button>
+        <button class='danger' data-action='delete'>删除</button>
+      </span>`;
+    listEl.appendChild(li);
+  }
+}
+
+async function refresh() {
+  try {
+    state.items = await api('/api/todos');
+    render();
+  } catch (e) {
+    toast('加载失败: ' + e.message);
+  }
+}
+
+listEl.addEventListener('click', async function (e) {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const id = btn.closest('[data-id]').dataset.id;
+  try {
+    if (btn.dataset.action === 'delete') {
+      await api('/api/todos/' + id, { method: 'DELETE' });
+    } else if (btn.dataset.action === 'edit') {
+      const cur = state.items.find(function (x) { return x.id == id; });
+      const payload = {};
+      let cancelled = false;
+      formEl.querySelectorAll('input, select, textarea').forEach(function (el) {
+        if (!el.name || cancelled) return;
+        const v = prompt((el.placeholder || el.name) + ':', cur && cur[el.name] != null ? cur[el.name] : '');
+        if (v === null) { cancelled = true; return; }
+        payload[el.name] = v.trim();
+      });
+      if (cancelled) return;
+      await api('/api/todos/' + id, { method: 'PUT', body: JSON.stringify(payload) });
+    }
+    await refresh();
+  } catch (err) {
+    toast('操作失败: ' + err.message);
+  }
 });
 
-async function loadTodos() {
-    try {
-        const response = await fetch('/api/todos');
-        if (!response.ok) {
-            throw new Error('Failed to fetch todos');
-        }
-        const todos = await response.json();
-        renderTodos(todos);
-    } catch (error) {
-        console.error(error);
-        alert('Error loading todos. Please try again later.');
-    }
-}
+formEl.addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const payload = {};
+  formEl.querySelectorAll('input, select, textarea').forEach(function (el) {
+    if (el.name) payload[el.name] = el.value.trim();
+  });
+  if (Object.values(payload).some(function (v) { return v === ''; })) { toast('请填写所有字段'); return; }
+  try {
+    await api('/api/todos', { method: 'POST', body: JSON.stringify(payload) });
+    formEl.reset();
+    await refresh();
+  } catch (err) {
+    toast('添加失败: ' + err.message);
+  }
+});
 
-function renderTodos(todos) {
-    const todoList = document.getElementById('todo-list');
-    todoList.innerHTML = '';
-    todos.forEach(todo => {
-        const li = document.createElement('li');
-        li.textContent = todo.title;
-        if (todo.completed) {
-            li.style.textDecoration = 'line-through';
-        }
-        li.appendChild(createDeleteButton(todo.id));
-        li.appendChild(createEditButton(todo.id, todo.title));
-        li.appendChild(createCompleteButton(todo.id, todo.completed));
-        todoList.appendChild(li);
-    });
-}
+function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); }
+applyTheme(localStorage.getItem('theme') || 'light');
+if (themeBtn) themeBtn.addEventListener('click', function () {
+  const next = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'light' : 'dark';
+  localStorage.setItem('theme', next);
+  applyTheme(next);
+});
 
-function createDeleteButton(id) {
-    const button = document.createElement('button');
-    button.textContent = 'Delete';
-    button.addEventListener('click', () => deleteTask(id));
-    return button;
-}
-
-function createEditButton(id, title) {
-    const button = document.createElement('button');
-    button.textContent = 'Edit';
-    button.addEventListener('click', () => editTask(id, title));
-    return button;
-}
-
-function createCompleteButton(id, completed) {
-    const button = document.createElement('button');
-    button.textContent = completed ? 'Mark Incomplete' : 'Mark Complete';
-    button.addEventListener('click', () => toggleComplete(id, completed));
-    return button;
-}
-
-async function addTask(event) {
-    event.preventDefault();
-    const title = document.getElementById('task-title').value.trim();
-    if (title === '') {
-        alert('Please enter a task title.');
-        return;
-    }
-    try {
-        const response = await fetch('/api/todos', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ title })
-        });
-        if (!response.ok) {
-            throw new Error('Failed to add task');
-        }
-        const todo = await response.json();
-        renderTodos([todo]);
-        document.getElementById('task-title').value = '';
-    } catch (error) {
-        console.error(error);
-        alert('Error adding task. Please try again later.');
-    }
-}
-
-async function deleteTask(id) {
-    try {
-        const response = await fetch(`/api/todos/${id}`, { method: 'DELETE' });
-        if (!response.ok) {
-            throw new Error('Failed to delete task');
-        }
-        loadTodos();
-    } catch (error) {
-        console.error(error);
-        alert('Error deleting task. Please try again later.');
-    }
-}
-
-async function editTask(id, title) {
-    const newTitle = prompt('Enter the new task title:', title);
-    if (newTitle === null || newTitle.trim() === '') {
-        return;
-    }
-    try {
-        const response = await fetch(`/api/todos/${id}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ title: newTitle })
-        });
-        if (!response.ok) {
-            throw new Error('Failed to update task');
-        }
-        loadTodos();
-    } catch (error) {
-        console.error(error);
-        alert('Error updating task. Please try again later.');
-    }
-}
-
-async function toggleComplete(id, completed) {
-    const newCompleted = !completed;
-    try {
-        const response = await fetch(`/api/todos/${id}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ completed: newCompleted })
-        });
-        if (!response.ok) {
-            throw new Error('Failed to update task');
-        }
-        loadTodos();
-    } catch (error) {
-        console.error(error);
-        alert('Error updating task. Please try again later.');
-    }
-}
-
-function toggleDarkMode() {
-    document.body.classList.toggle('dark-mode');
-}
+refresh();
+// <<< SKELETON END

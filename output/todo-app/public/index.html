@@ -1,20 +1,22 @@
 <!DOCTYPE html>
-<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Todo App</title>
-    <link rel="stylesheet" href="styles.css">
+  <link rel='stylesheet' href='styles.css'>
 </head>
 <body>
-    <div id="app">
-        <button id="toggle-dark-mode">Toggle Dark Mode</button>
-        <form id="add-task-form">
-            <input type="text" id="task-title" placeholder="Add new task...">
-            <button type="submit">Add Task</button>
-        </form>
-        <ul id="todo-list"></ul>
-    </div>
-    <script src="app.js"></script>
+  <div class='container'>
+    <header>
+      <h1>待办事项</h1>
+      <button id='theme'>切换主题</button>
+    </header>
+    <form id='form' class='card'>
+      <div class='row'>
+        <input type='text' name='title' placeholder='任务标题' required>
+      </div>
+      <button type='submit'>添加</button>
+    </form>
+    <ul id='list' class='list'></ul>
+    <div id='toast' class='toast'></div>
+  </div>
+  <script src='app.js'></script>
 </body>
 </html>

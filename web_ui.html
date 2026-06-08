@@ -315,11 +315,12 @@
           <div class='completion-icon' id='completionIcon'></div>
           <h2 id='completionTitle'></h2>
           <div id='completionMessage'></div>
+          <button class='btn' id='launchBtn' style='display: none; margin-top: 20px;'>🚀 启动项目</button>
         </div>
       </div>
-      
+
     </div>
-    
+
     <!-- 右侧:统计信息 -->
     <div>
       <div class='section'>
@@ -330,7 +331,7 @@
           <div><strong>日志条数:</strong> <span id='logCount'>0</span></div>
         </div>
       </div>
-      
+
       <div class='section' style='margin-top: 20px;'>
         <div class='section-title'>ℹ️ 说明</div>
         <div style='font-size: 0.9rem; color: var(--muted); line-height: 1.8;'>
@@ -342,7 +343,7 @@
             <li>DevOps 产出交付文件</li>
             <li>QA 工程师检查质量</li>
           </ul>
-          <p>预计 3-8 分钟完成。</p>
+          <p>预计 5-15 分钟完成。</p>
         </div>
       </div>
     </div>
@@ -411,6 +412,38 @@ document.getElementById('theme').addEventListener('click', () => {
   html.setAttribute('data-theme', next);
   localStorage.setItem('theme', next);
   document.getElementById('theme').textContent = next === 'dark' ? '☀️' : '🌙';
+});
+
+document.getElementById('launchBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('launchBtn');
+  btn.disabled = true;
+  btn.textContent = '启动中...';
+
+  try {
+    const res = await fetch(`${apiBase}/launch`, { method: 'POST' });
+
+    if (!res.ok) {
+      const err = await res.json();
+      alert('启动失败: ' + (err.error || res.statusText));
+      btn.disabled = false;
+      btn.textContent = '🚀 启动项目';
+      return;
+    }
+
+    const data = await res.json();
+
+    // 显示启动日志
+    document.getElementById('logsSection').style.display = 'block';
+    document.getElementById('completionSection').style.display = 'none';
+
+    // 重新启动日志流
+    _startLogStream();
+
+  } catch (e) {
+    alert('网络错误: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '🚀 启动项目';
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -518,16 +551,30 @@ function _handleCompletion(status) {
   const icon = document.getElementById('completionIcon');
   const title = document.getElementById('completionTitle');
   const msg = document.getElementById('completionMessage');
+  const launchBtn = document.getElementById('launchBtn');
 
   if (status === 'completed') {
     icon.textContent = '✅';
     title.textContent = '流水线完成!';
-    msg.innerHTML = `<div class='info-box'><p>项目已生成,请进入项目目录运行:</p>
-      <code>npm install && npm start</code></div>`;
+    msg.innerHTML = `<div class='info-box'>
+      <p>✨ 项目已生成!</p>
+      <p style='margin-top: 12px;'>可以选择:</p>
+      <ul style='margin: 8px 0; padding-left: 20px; text-align: left;'>
+        <li>点下方按钮自动启动项目</li>
+        <li>或手动进入项目目录运行 <code>npm install && npm start</code></li>
+        <li>服务运行在 http://localhost:3000</li>
+      </ul>
+    </div>`;
+
+    // 显示启动按钮
+    launchBtn.style.display = '';
+    launchBtn.disabled = false;
+    launchBtn.textContent = '🚀 启动项目';
   } else {
     icon.textContent = '❌';
     title.textContent = '流水线错误';
     msg.innerHTML = `<div class='info-box error'><p>执行中出现错误,请检查日志。</p></div>`;
+    launchBtn.style.display = 'none';
   }
 }
 

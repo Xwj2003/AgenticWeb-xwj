@@ -1,14 +1,17 @@
 """
-Web UI 后端 API (改进版):
-- 更好地集成现有 orchestrator
-- 支持实时日志推送
-- 完整的人工审核流程支持
+Web UI 后端 API (完整改进版):
+- 集成现有 orchestrator 流水线
+- 实时日志推送 (Server-Sent Events)
+- 完整人工审核流程支持
+- 项目自动启动功能
 """
 import json
 import threading
 import queue
 import time
-import uuid
+import subprocess
+import os
+import shutil
 from typing import Optional, Dict, Any
 from flask import Flask, request, jsonify, Response
 from io import StringIO
@@ -25,7 +28,6 @@ from agents import (
     DevOpsAgent,
     QAAgent,
 )
-from human_review import ReviewAction, review_prd, review_architecture, review_qa
 from runner import launch_project
 
 app = Flask(__name__)
@@ -37,7 +39,6 @@ app = Flask(__name__)
 
 class LogCapture:
     """捕获所有日志,推送给前端。"""
-
     def __init__(self):
         self.logs = []
         self.lock = threading.Lock()
@@ -66,14 +67,13 @@ class PipelineState:
         self.result = None
         self.review_data = None  # 待审核的数据
         self.review_type = None  # "prd" / "architecture" / "qa"
-        self.review_regen_count = 0
-        self.max_regen = 3
         self.logs = LogCapture()
 
 
 # 全局变量
 state = PipelineState()
 review_feedback_queue = queue.Queue()
+MAX_REGEN = 3
 MAX_QA_ROUNDS = 3
 
 
@@ -135,7 +135,6 @@ def start_pipeline():
 @app.route("/api/logs", methods=["GET"])
 def get_logs():
     """Server-Sent Events:实时推送日志。"""
-
     def log_stream():
         last_count = 0
         while state.status in ("running", "waiting_review"):
@@ -189,6 +188,27 @@ def get_result():
     })
 
 
+@app.route("/api/launch", methods=["POST"])
+def launch_project_endpoint():
+    """启动生成的项目 (npm install + npm start)。"""
+    if state.status != "completed" or not state.result:
+        return jsonify({"error": "流水线未成功完成"}), 400
+
+    project_dir = state.result.get("project_dir")
+    if not project_dir:
+        return jsonify({"error": "无效的项目目录"}), 400
+
+    # 在后台线程启动项目,避免阻塞 HTTP 响应
+    thread = threading.Thread(
+        target=_launch_project_bg,
+        args=(project_dir,)
+    )
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({"message": "项目启动中...", "project_dir": project_dir})
+
+
 # ─────────────────────────────────────────────────────────────────
 # 后台流水线执行
 # ─────────────────────────────────────────────────────────────────
@@ -210,7 +230,7 @@ def _run_pipeline_bg():
         # ════════════════════════════════════════════════════════════
         # Step 1: 产品经理 + HITL
         # ════════════════════════════════════════════════════════════
-        for regen in range(1, MAX_REGEN := 3 + 1):
+        for regen in range(1, MAX_REGEN + 1):
             if regen > 1:
                 _log("info", "ProductManager", f"重生成 (第 {regen}/{MAX_REGEN} 次)")
 
@@ -226,7 +246,7 @@ def _run_pipeline_bg():
                 raise SystemExit("用户中止于 PRD 环节")
 
             if feedback["action"] == "approve":
-                _log("info", "ProductManager", f"用户批准 PRD")
+                _log("info", "ProductManager", "用户批准 PRD")
                 break
 
             if regen == MAX_REGEN:
@@ -235,7 +255,7 @@ def _run_pipeline_bg():
 
             # 反馈重生成
             ctx.user_feedback["ProductManager"] = feedback["feedback"]
-            _log("info", "ProductManager", f"携带用户反馈重新生成...")
+            _log("info", "ProductManager", "携带用户反馈重新生成...")
 
         # ════════════════════════════════════════════════════════════
         # Step 2: 架构师 + HITL
@@ -263,7 +283,7 @@ def _run_pipeline_bg():
                 break
 
             ctx.user_feedback["Architect"] = feedback["feedback"]
-            _log("info", "Architect", f"携带用户反馈重新设计...")
+            _log("info", "Architect", "携带用户反馈重新设计...")
 
         # ════════════════════════════════════════════════════════════
         # Step 3-5: 后端 / 前端 / DevOps
@@ -287,7 +307,7 @@ def _run_pipeline_bg():
             _log("info", "QA", f"开始第 {round_num}/{MAX_QA_ROUNDS} 轮检查")
             QAAgent(llm).run(ctx)
 
-            if Config.HUMAN_IN_LOOP and round_num > 0:
+            if Config.HUMAN_IN_LOOP:
                 feedback = _wait_for_review("qa", ctx.qa_report)
                 if feedback["action"] == "abort":
                     raise SystemExit("用户中止于 QA 环节")
@@ -308,7 +328,6 @@ def _run_pipeline_bg():
             _log("info", "QA", f"触发自动修复,重跑相关 Agent...")
             ctx.qa_failures = [c for c in ctx.qa_report.get("checks", []) if not c.get("passed")]
 
-            # 简单策略:全部重跑
             BackendAgent(llm).run(ctx)
             FrontendAgent(llm).run(ctx)
             DevOpsAgent(llm).run(ctx)
@@ -331,8 +350,8 @@ def _run_pipeline_bg():
 
         # 自动启动(可选)
         if (ctx.qa_report or {}).get("all_passed") and Config.AUTO_RUN:
-            _log("info", "Pipeline", "自动启动服务...")
-            launch_project(ctx.project_dir, port=Config.RUN_PORT)
+            _log("info", "Launcher", "自动启动服务中...")
+            _launch_project_bg(ctx.project_dir)
 
     except SystemExit as e:
         state.status = "completed"
@@ -347,10 +366,53 @@ def _run_pipeline_bg():
         traceback.print_exc()
 
 
+def _launch_project_bg(project_dir: str):
+    """在后台启动生成的项目。"""
+    _log("info", "Launcher", f"开始启动项目: {project_dir}")
+
+    # 检查 Node.js 是否安装
+    if shutil.which("node") is None or shutil.which("npm") is None:
+        _log("error", "Launcher", "Node.js / npm 未安装,无法启动项目")
+        return
+
+    try:
+        # npm install
+        _log("info", "Launcher", "安装依赖中...")
+        result = subprocess.run(
+            "npm install --no-audit --no-fund",
+            cwd=project_dir,
+            shell=True,
+            capture_output=False,
+        )
+
+        if result.returncode != 0:
+            _log("error", "Launcher", "npm install 失败")
+            return
+
+        _log("success", "Launcher", "依赖安装完成")
+
+        # npm start
+        _log("info", "Launcher", "启动服务中...")
+        port = Config.RUN_PORT
+        _log("success", "Launcher", f"服务运行在 http://localhost:{port}")
+
+        env = dict(os.environ)
+        env["PORT"] = str(port)
+        subprocess.run(
+            "npm start",
+            cwd=project_dir,
+            shell=True,
+            env=env,
+        )
+
+        _log("info", "Launcher", "服务已停止")
+
+    except Exception as e:
+        _log("error", "Launcher", f"启动失败: {e}")
+
+
 def _wait_for_review(review_type: str, review_data: Any) -> dict:
-    """
-    暂停流水线,等待前端提交的审核反馈。
-    """
+    """暂停流水线,等待前端提交的审核反馈。"""
     global state
 
     state.status = "waiting_review"
@@ -367,7 +429,6 @@ def _wait_for_review(review_type: str, review_data: Any) -> dict:
         except queue.Empty:
             # 定期检查状态(防止死等)
             if state.status != "waiting_review":
-                # 如果外部改了状态,就返回默认批准
                 return {"action": "approve", "feedback": ""}
             continue
 
@@ -392,8 +453,6 @@ def _log(level: str, stage: str, message: str):
 # ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import os
-
     # 确保 web_ui.html 存在
     if not os.path.exists("web_ui.html"):
         print("❌ 错误:找不到 web_ui.html")
