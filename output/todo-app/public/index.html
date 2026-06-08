@@ -1,22 +1,669 @@
 <!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-  <link rel='stylesheet' href='styles.css'>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <link rel="stylesheet" href="/styles.css">
+  <title>TODO应用WEB</title>
+  <style>
+    /* 全局重置 + 高级美学优化 */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :root {
+      /* 温柔现代配色 — 玻璃质感基底 */
+      --bg: #f4f6fb;
+      --surface: rgba(255, 255, 255, 0.92);
+      --surface-solid: #ffffff;
+      --text: #1e293b;
+      --text-soft: #334155;
+      --muted: #64748b;
+      --primary: #6366f1;
+      --primary-glow: rgba(99, 102, 241, 0.25);
+      --primary-hover: #4f46e5;
+      --danger: #f43f5e;
+      --danger-soft: #ffe4e6;
+      --ok: #10b981;
+      --ok-soft: #d1fae5;
+      --border: rgba(203, 213, 225, 0.5);
+      --radius-card: 24px;
+      --radius-element: 18px;
+      --shadow-sm: 0 8px 20px rgba(0, 0, 0, 0.02), 0 2px 6px rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 20px 35px -12px rgba(0, 0, 0, 0.1);
+      --transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    [data-theme="dark"] {
+      --bg: #0b1120;
+      --surface: rgba(18, 25, 45, 0.85);
+      --surface-solid: #0f172a;
+      --text: #eef2ff;
+      --text-soft: #cbd5e1;
+      --muted: #94a3b8;
+      --primary: #818cf8;
+      --primary-glow: rgba(129, 140, 248, 0.3);
+      --primary-hover: #a5b4fc;
+      --danger: #fb7185;
+      --danger-soft: #2c1a23;
+      --ok: #34d399;
+      --ok-soft: #1e2a2a;
+      --border: rgba(51, 65, 85, 0.7);
+      --shadow-sm: 0 8px 20px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 20px 35px -12px rgba(0, 0, 0, 0.6);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      line-height: 1.5;
+      transition: background 0.3s ease, color 0.2s ease;
+      min-height: 100vh;
+      backdrop-filter: blur(0px);
+    }
+
+    /* 优雅背景装饰 */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -20%;
+      left: -10%;
+      width: 60%;
+      height: 60%;
+      background: radial-gradient(circle, rgba(99,102,241,0.08) 0%, rgba(99,102,241,0) 70%);
+      pointer-events: none;
+      z-index: -1;
+      border-radius: 50%;
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -10%;
+      right: -5%;
+      width: 50%;
+      height: 50%;
+      background: radial-gradient(circle, rgba(244,63,94,0.06) 0%, rgba(244,63,94,0) 70%);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    #app {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+      position: relative;
+      min-height: 100vh;
+    }
+
+    /* 头部区域 */
+    .app-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .title-section h1 {
+      font-size: 2rem;
+      font-weight: 620;
+      letter-spacing: -0.01em;
+      background: linear-gradient(135deg, var(--primary), #8b5cf6);
+      background-clip: text;
+      -webkit-background-clip: text;
+      color: transparent;
+      margin-bottom: 4px;
+    }
+
+    .sub {
+      font-size: 0.85rem;
+      color: var(--muted);
+      font-weight: 450;
+    }
+
+    /* 主题切换胶囊 */
+    .theme-switch {
+      background: var(--surface-solid);
+      border: 1px solid var(--border);
+      border-radius: 60px;
+      padding: 6px 12px;
+      font-size: 1.2rem;
+      line-height: 1;
+      backdrop-filter: blur(4px);
+      transition: var(--transition);
+      box-shadow: var(--shadow-sm);
+      cursor: pointer;
+    }
+
+    .theme-switch:hover {
+      background: var(--primary);
+      color: white;
+      border-color: transparent;
+      transform: scale(0.96);
+    }
+
+    /* 表单卡片 */
+    .form-card {
+      background: var(--surface);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      padding: 18px 24px 24px;
+      margin-bottom: 32px;
+      box-shadow: var(--shadow-md);
+      transition: var(--transition);
+    }
+
+    .input-group {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .input-group input {
+      flex: 1;
+      background: var(--surface-solid);
+      border: 1.5px solid var(--border);
+      border-radius: 48px;
+      padding: 14px 20px;
+      font-size: 0.95rem;
+      transition: var(--transition);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .input-group input:focus {
+      border-color: var(--primary);
+      outline: none;
+      box-shadow: 0 0 0 3px var(--primary-glow);
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      border: none;
+      border-radius: 48px;
+      padding: 12px 28px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      color: white;
+      transition: var(--transition);
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(99, 102, 241, 0.2);
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px -5px var(--primary-glow);
+    }
+
+    /* 统计栏 */
+    .stats-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin: 12px 6px 20px 6px;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .search-box {
+      background: var(--surface-solid);
+      border: 1px solid var(--border);
+      border-radius: 40px;
+      padding: 8px 16px;
+      width: 180px;
+      font-size: 0.85rem;
+      transition: var(--transition);
+    }
+
+    .search-box:focus {
+      width: 220px;
+      border-color: var(--primary);
+    }
+
+    /* 待办列表 - 灵动卡片 */
+    .todo-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .todo-item {
+      background: var(--surface);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: var(--transition);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .todo-item:hover {
+      transform: translateY(-2px);
+      background: var(--surface-solid);
+      border-color: rgba(99, 102, 241, 0.4);
+      box-shadow: 0 15px 30px -12px rgba(0, 0, 0, 0.15);
+    }
+
+    .todo-content {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex: 1;
+    }
+
+    .todo-title {
+      font-weight: 550;
+      font-size: 1rem;
+      word-break: break-word;
+      color: var(--text);
+      transition: var(--transition);
+    }
+
+    .completed-title {
+      text-decoration: line-through;
+      color: var(--muted);
+      opacity: 0.75;
+    }
+
+    /* 自定义打勾伪状态 */
+    .status-icon {
+      width: 26px;
+      height: 26px;
+      border-radius: 30px;
+      background: var(--surface-solid);
+      border: 2px solid var(--border);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .completed-icon {
+      background: var(--ok);
+      border-color: var(--ok);
+      color: white;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+    }
+
+    .action-btn {
+      background: transparent;
+      border: none;
+      padding: 8px 14px;
+      border-radius: 40px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition);
+      backdrop-filter: blur(4px);
+    }
+
+    .complete-btn {
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .complete-btn:hover {
+      background: var(--ok);
+      color: white;
+      transform: scale(0.96);
+    }
+
+    .delete-btn {
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .delete-btn:hover {
+      background: var(--danger);
+      color: white;
+    }
+
+    /* 空状态 & 加载 */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      background: var(--surface);
+      border-radius: var(--radius-card);
+      border: 1px dashed var(--border);
+      color: var(--muted);
+      font-weight: 450;
+    }
+
+    .loading-spinner {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      padding: 40px;
+      color: var(--primary);
+    }
+
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid rgba(99, 102, 241, 0.2);
+      border-top: 3px solid var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* 吐司提示 - 现代感 */
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #1e293b;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 60px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      box-shadow: 0 20px 35px -8px black;
+      backdrop-filter: blur(12px);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s, transform 0.2s, visibility 0.2s;
+      z-index: 200;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    .toast.show {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .toast.ok {
+      background: var(--ok);
+      color: #0f2f1f;
+    }
+
+    .error-banner {
+      background: var(--danger-soft);
+      border-left: 5px solid var(--danger);
+      border-radius: 20px;
+      padding: 12px 18px;
+      margin: 16px 0;
+      font-size: 0.85rem;
+      color: var(--danger);
+    }
+
+    /* 响应式 */
+    @media (max-width: 550px) {
+      #app {
+        padding: 20px 16px 48px;
+      }
+      .input-group {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .btn-primary {
+        justify-content: center;
+        display: flex;
+      }
+      .todo-item {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+      }
+      .action-buttons {
+        justify-content: flex-end;
+      }
+      .search-box {
+        width: 100%;
+      }
+      .stats-bar {
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+    }
+  </style>
+  <script src="https://unpkg.com/petite-vue"></script>
 </head>
 <body>
-  <div class='container'>
-    <header>
-      <h1>待办事项</h1>
-      <button id='theme'>切换主题</button>
-    </header>
-    <form id='form' class='card'>
-      <div class='row'>
-        <input type='text' name='title' placeholder='任务标题' required>
+  <div id="app" v-scope @vue:mounted="init()">
+    <!-- 头部区域优化 -->
+    <div class="app-header">
+      <div class="title-section">
+        <h1>TODO应用WEB</h1>
       </div>
-      <button type='submit'>添加</button>
-    </form>
-    <ul id='list' class='list'></ul>
-    <div id='toast' class='toast'></div>
+      <button class="theme-switch" @click="toggleTheme">
+        🌓
+      </button>
+    </div>
+
+    <!-- 表单卡片 -->
+    <div class="form-card">
+      <form @submit.prevent="addItem">
+        <div class="input-group">
+          <input type="text" v-model="form.title" placeholder="写一个待办..." autocomplete="off" required>
+          <button type="submit" class="btn-primary">+ 添加任务</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 统计 + 搜索栏 -->
+    <div class="stats-bar">
+      <span>📋 全部 · {{ items.length }} 项</span>
+      <div>
+        <input type="text" class="search-box" placeholder="🔍 过滤待办" v-model="search">
+      </div>
+    </div>
+
+    <!-- 加载状态 -->
+    <div v-if="loading" class="loading-spinner">
+      <div class="spinner"></div> <span>加载中，稍等片刻...</span>
+    </div>
+
+    <!-- 空状态展示 -->
+    <div v-if="!loading && filteredItems().length === 0" class="empty-state">
+      🍃 这里空空的，<br> 添加第一条待办吧~
+    </div>
+
+    <!-- 待办列表 动态渲染 增强交互感 -->
+    <ul v-if="!loading && filteredItems().length > 0" class="todo-list">
+      <li class="todo-item" v-for="item in filteredItems()" :key="item.id">
+        <div class="todo-content">
+          <div class="status-icon" :class="item.completed ? 'completed-icon' : ''">
+            {{ item.completed ? '✓' : '○' }}
+          </div>
+          <div class="todo-title" :class="item.completed ? 'completed-title' : ''">
+            {{ item.title }}
+          </div>
+        </div>
+        <div class="action-buttons">
+          <button v-if="!item.completed" class="action-btn complete-btn" @click="completeItem(item)">
+            ✓ 完成
+          </button>
+          <button class="action-btn delete-btn" @click="deleteItem(item.id)">
+            🗑 删除
+          </button>
+        </div>
+      </li>
+    </ul>
+
+    <!-- 错误提示 -->
+    <div v-if="error" class="error-banner">
+      ⚠️ {{ error }}
+    </div>
+
+    <!-- 全局吐司 -->
+    <div class="toast" :class="{ show: toastMsg, ok: toastOk }">
+      {{ toastMsg }}
+    </div>
   </div>
-  <script src='app.js'></script>
+
+  <script>
+    // 沿用原始的 PetiteVue 结构，但优化内部字段并保留所有 api 交互逻辑
+    // 为保证完全符合原始接口对接，不改变任何请求路径与方法，仅增加前端视觉 & 用户体验优化
+    const { createApp } = window.PetiteVue;
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options
+      });
+      if (!res.ok) {
+        let msg = res.statusText;
+        try { msg = (await res.json()).error || msg; } catch (e) {}
+        throw new Error(msg);
+      }
+      return res.status === 204 ? null : res.json();
+    }
+
+    createApp({
+      // 状态
+      items: [],
+      form: { title: '' },
+      editingId: null,
+      search: '',
+      loading: false,
+      error: '',
+      toastMsg: '',
+      toastOk: false,
+
+      async init() {
+        await this.fetchItems();
+      },
+
+      filteredItems() {
+        const kw = (this.search || '').toLowerCase().trim();
+        if (!kw) return this.items;
+        return this.items.filter(it =>
+          (it.title || '').toLowerCase().includes(kw)
+        );
+      },
+
+      async fetchItems() {
+        this.loading = true;
+        this.error = '';
+        try {
+          this.items = await api('/api/todos');
+        } catch (e) {
+          this.error = e.message;
+          this.toast(e.message, false);
+        } finally {
+          this.loading = false;
+        }
+      },
+
+      async addItem() {
+        if (!this.form.title || this.form.title.trim() === '') {
+          this.toast('请填写待办内容', false);
+          return;
+        }
+        try {
+          await api('/api/todos', {
+            method: 'POST',
+            body: JSON.stringify({ title: this.form.title })
+          });
+          this.form = { title: '' };
+          this.toast('✨ 新任务已添加', true);
+          await this.fetchItems();
+        } catch (e) {
+          this.error = e.message;
+          this.toast(e.message, false);
+        }
+      },
+
+      // 完成专用（原 bug 修复逻辑保留）
+      async completeItem(item) {
+        try {
+          await api('/api/todos/' + item.id, {
+            method: 'PUT',
+            body: JSON.stringify({ ...item, completed: true })
+          });
+          this.toast('🎉 恭喜完成任务', true);
+          await this.fetchItems();
+        } catch (e) {
+          this.error = e.message;
+          this.toast(e.message, false);
+        }
+      },
+
+      // 编辑相关 (保留扩展)
+      startEdit(item) {
+        this.editingId = item.id;
+        this.form = { ...item };
+      },
+
+      async updateItem() {
+        try {
+          await api('/api/todos/' + this.editingId, {
+            method: 'PUT',
+            body: JSON.stringify(this.form)
+          });
+          this.editingId = null;
+          this.form = {};
+          this.toast('已更新', true);
+          await this.fetchItems();
+        } catch (e) {
+          this.error = e.message;
+          this.toast(e.message, false);
+        }
+      },
+
+      cancelEdit() {
+        this.editingId = null;
+        this.form = {};
+      },
+
+      async deleteItem(id) {
+        if (!confirm('确定要永久删除该项吗？')) return;
+        try {
+          await api('/api/todos/' + id, { method: 'DELETE' });
+          this.toast('🗑 已删除待办', true);
+          await this.fetchItems();
+        } catch (e) {
+          this.error = e.message;
+          this.toast(e.message, false);
+        }
+      },
+
+      toast(msg, ok = false) {
+        this.toastMsg = msg;
+        this.toastOk = ok;
+        setTimeout(() => { this.toastMsg = ''; }, 2200);
+      },
+
+      toggleTheme() {
+        const el = document.documentElement;
+        const current = el.dataset.theme;
+        if (current === 'dark') {
+          el.dataset.theme = '';
+          this.toast('☀️ 浅色模式', true);
+        } else {
+          el.dataset.theme = 'dark';
+          this.toast('🌙 深色模式', true);
+        }
+      },
+    }).mount('#app');
+  </script>
 </body>
 </html>

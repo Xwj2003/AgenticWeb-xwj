@@ -15,7 +15,8 @@ ARCH_SYSTEM_PROMPT = """你是一位资深软件架构师。你的职责是基�
    - 存储: 纯 JS 的本地 JSON 文件 —— 用 Node 内置 fs 读写一个 data.json。不装任何数据库,不需要编译原生模块,npm install 秒过。
    - 前端: 纯 HTML + 原生 JavaScript + 简单 CSS,无任何构建步骤,直接在浏览器打开即可
 2. 优先简单。坚决不要引入框架(React/Vue/Next)、不要 TypeScript、不要 Webpack;数据库一律不用(SQLite / better-sqlite3 / mysql / mongodb 等全部禁止),只用 JSON 文件。
-3. api_contract 是前后端的合同,必须明确每个接口的:method、path、请求体、响应体。
+3. api_contract 是前后端的合同,必须明确每个接口的:method、path、请求体(request_body)、响应体(response_example);如有筛选需求还须加 query_params。
+3.5 如果 PRD 要求"筛选/过滤"功能(如按状态、类型过滤列表),在对应的 GET 接口增加 `query_params` 字段(值为对象,key=参数名,value=描述+允许值);接口路径本身不变,不要为筛选另设子路径。query_params 无筛选需求时设为 null。
 4. 接口路径用 /api 前缀。路径只允许字母、数字、下划线、连字符、斜杠和 {参数},绝不能出现任何特殊符号或控制字符。
 5. 集合名(data.json 里的键)用复数小写下划线(如 todos, todo_items)。
 6. 必须严格输出合法 JSON,不要任何 Markdown 包装。
@@ -45,7 +46,8 @@ ARCH_SYSTEM_PROMPT = """你是一位资深软件架构师。你的职责是基�
     {
       "method": "GET",
       "path": "/api/todos",
-      "description": "获取全部待办",
+      "description": "获取待办列表,支持状态筛选",
+      "query_params": {"status": "all|active|completed (可选,默认返回全部)"},
       "request_body": null,
       "response_example": [{"id": 1, "title": "...", "completed": false}]
     }

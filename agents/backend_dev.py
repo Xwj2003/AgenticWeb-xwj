@@ -79,9 +79,15 @@ app.listen(PORT, () => console.log(`running at http://localhost:${PORT}`));
 
 【五类操作的标准写法(每个 handler 都是:load → 改内存 → save)】
 
-// 列表
+// 列表(若 api_contract 该接口声明了 query_params,用 req.query 实现筛选)
 app.get('/api/<collection>', (req, res) => {
-  res.json(load().<collection>);
+  let items = load().<collection>;
+  // 按 api_contract.query_params 的字段做筛选,以 "status" 过滤 completed 为例:
+  const { status } = req.query;            // req.query 自动解析 ?status=active 等 query string
+  if (status === 'active')    items = items.filter(x => !x.completed);
+  else if (status === 'completed') items = items.filter(x => x.completed);
+  // 无参数 / status=all / 未知值 → 返回全部
+  res.json(items);
 });
 
 // 新建(按 data_model 取请求体字段,做必要校验,布尔/数字直接用原生类型)
@@ -147,6 +153,7 @@ class BackendAgent(BaseAgent):
             + ctx.summary_for(self.name)
             + "\n\n重要提示:你只能实现 api_contract 里声明的接口,严禁增加新接口或修改路径。"
             "\n请严格依据 data_models 里的真实集合名与字段实现,提示里的 <collection> 只是占位示例。"
+            "\n如果 api_contract 某 GET 接口声明了 query_params,必须用 req.query 实现对应的筛选逻辑,字段名与允许值以 query_params 为准。"
             "\n所有文件内容必须是完整可运行的代码,不要任何占位符。"
             "\n请按 JSON schema 输出。"
         )

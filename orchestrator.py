@@ -289,6 +289,9 @@ def _get_failed_agents(qa_report: dict) -> set:
         elif name == "工程化文件齐全":
             agents.add("DevOps")
 
+        elif name == "前端框架用法正确 (Petite Vue)":
+            agents.add("Frontend")
+
     return agents
 
 

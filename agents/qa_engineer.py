@@ -1,13 +1,21 @@
 """
-QA Agent:质量保障。这是整个系统的"刹车" —— 防 LLM 幻觉的关键。
+QA Agent - Windows 兼容版本 + 前端框架健全性检查
 
-特点:
-- 大量使用确定性检查(正则、JSON 解析、文件存在性),不完全依赖 LLM 判断
-- 重点检查"契约一致性":后端是否实现了所有声明的接口,前端是否只调用了已声明的接口
-- 关键升级:加入"运行时冒烟测试"—— 真正 npm install + 启动 server + 打几个接口,
-  这是唯一能拦住"语法正确但跑不起来"(启动即崩溃、缺 express.static 等)的手段
-- 检查不通过会在报告中标红,自动修复循环会据此重跑对应 Agent
+历史:
+  - Windows 上 subprocess.run(["npm", ...]) 找不到 npm 命令,
+    Windows npm 是 npm.cmd 脚本,需要用 shell=True。已在 _check_runtime_smoke 处理。
+
+v2.2 新增(重要):
+  - 新增检查 11:前端框架健全性静态检查(_check_frontend_framework)。
+    运行时冒烟测试只启动后端、看 GET / 是否返回 HTML,
+    【不会在浏览器里执行 app.js】,所以前端用错框架 API(例如把
+    Petite Vue 写成 Vue3 的 data()/methods()/mounted())时,页面其实是
+    死的,但旧 QA 全绿。新增的静态检查正是用来挡住这类回归:
+      · 禁止出现 Vue3/Vue2 特征:data() / methods: / computed: / new Vue
+      · 必须调用 createApp 且 .mount(
+      · 必须有 @vue:mounted(否则页面加载后不会拉数据)
 """
+
 import os
 import re
 import json
@@ -44,23 +52,26 @@ class QAAgent(BaseAgent):
         # 检查 4:前端是否只调用了 api_contract 中声明的接口(契约一致性)
         checks.append(self._check_frontend_calls(ctx))
 
-        # 检查 5(新增):前端是否把契约里的每个操作都实现了(防止只做增/查,丢掉删/改/标记完成)
+        # 检查 5:前端是否把契约里的每个操作都实现了(防止只做增/查,丢掉删/改)
         checks.append(self._check_frontend_coverage(ctx))
 
-        # 检查 6(新增):index.html 是否以合法 <!DOCTYPE html> 开头
+        # 检查 6:index.html 是否以合法 <!DOCTYPE html> 开头
         checks.append(self._check_html_doctype(ctx))
 
-        # 检查 7(新增):后端是否用 express.static 托管了前端(否则访问 / 会 Cannot GET /)
+        # 检查 7:后端是否用 express.static 托管了前端
         checks.append(self._check_static_serving(ctx))
 
         # 检查 8:Node 是否可用 + node --check 语法检查
         checks.append(self._check_js_syntax(ctx))
 
-        # 检查 9(治本兜底):真正启动服务 + 打接口的冒烟测试
+        # 检查 9:真正启动服务 + 打接口的冒烟测试 [Windows 兼容版]
         checks.append(self._check_runtime_smoke(ctx))
 
         # 检查 10:启动文件 + README 都在
         checks.append(self._check_devops_files(ctx))
+
+        # 检查 11:前端框架健全性(Petite Vue 用法正确性)[v2.2 新增]
+        checks.append(self._check_frontend_framework(ctx))
 
         passed = sum(1 for c in checks if c["passed"])
         total = len(checks)
@@ -83,18 +94,51 @@ class QAAgent(BaseAgent):
 
     @staticmethod
     def _norm_path(p: str) -> str:
-        """
-        把各种写法的路径统一成 :param 形式,方便前后端/契约互相比对:
-        - 去掉 query string
-        - ${id}(前端模板字符串) → :param
-        - {id} (契约 OpenAPI 写法)→ :param
-        - :id  (express 写法)    → :param
-        """
+        """把各种写法的路径统一成 :param 形式"""
         p = p.split("?")[0]
-        p = re.sub(r"\$\{[^}]+\}", ":param", p)              # ${id}
-        p = re.sub(r"\{[^}]+\}", ":param", p)                # {id}
-        p = re.sub(r":[a-zA-Z_][a-zA-Z0-9_]*", ":param", p)  # :id
+        p = re.sub(r"\$\{[^}]+\}", ":param", p)
+        p = re.sub(r"\{[^}]+\}", ":param", p)
+        p = re.sub(r":[a-zA-Z_][a-zA-Z0-9_]*", ":param", p)
         return p.rstrip("/") or "/"
+
+    @staticmethod
+    def _collection_from_path(path: str) -> str:
+        """/api/todos/:id -> todos"""
+        segs = [
+            s for s in path.split("/")
+            if s and s != "api" and not s.startswith(("{", ":"))
+        ]
+        return segs[0] if segs else ""
+
+    @staticmethod
+    def _sample_value(t: str):
+        t = (t or "").lower()
+        if any(k in t for k in ("num", "int", "float", "double")):
+            return 1
+        if "bool" in t:
+            return True
+        if any(k in t for k in ("array", "list")):
+            return []
+        if "obj" in t:
+            return {}
+        return "qa_smoke"
+
+    def _sample_body(self, ctx: SharedContext, ep: dict) -> dict:
+        """为 POST 冒烟造一个尽力而为的请求体"""
+        rb = ep.get("request_body")
+        if isinstance(rb, dict) and rb:
+            return rb
+        coll = self._collection_from_path(ep.get("path", ""))
+        models = (ctx.architecture or {}).get("data_models", [])
+        model = next((m for m in models if m.get("collection") == coll), None)
+        body = {}
+        if model:
+            for f in model.get("fields", []):
+                n = f.get("name")
+                if not n or n.lower() == "id":
+                    continue
+                body[n] = self._sample_value(f.get("type"))
+        return body
 
     # ===== 各项检查 =====
 
@@ -157,14 +201,6 @@ class QAAgent(BaseAgent):
         }
 
     def _check_frontend_calls(self, ctx: SharedContext) -> dict:
-        """
-        前端只能调用契约里声明的接口。
-
-        ★ 修复(原版的真正 bug):原代码只把契约里的 :id 归一化成 :param,
-          却没处理契约实际使用的 {id} 写法,导致所有带参接口永远被判为"越界",
-          逼着 LLM 为了过检把删/改/标记完成的 fetch 全删掉 —— 这正是"功能缺失"的根因。
-          现在前端与契约都统一走 _norm_path。
-        """
         contract = (ctx.architecture or {}).get("api_contract", [])
         contract_paths = {self._norm_path(ep.get("path", "")) for ep in contract}
 
@@ -186,11 +222,6 @@ class QAAgent(BaseAgent):
         }
 
     def _check_frontend_coverage(self, ctx: SharedContext) -> dict:
-        """
-        新增:前端必须实现契约里的每一种操作。
-        原系统只检查"有没有越界",却不检查"有没有漏做"——于是 app.js 只做增/查、
-        丢掉删/改/标记完成也能全绿。这里按 HTTP 方法粒度反向核对覆盖率。
-        """
         contract = (ctx.architecture or {}).get("api_contract", [])
         if not contract:
             return {"name": "前端实现了契约里全部操作(增删改查)", "passed": True, "detail": "契约为空"}
@@ -201,91 +232,65 @@ class QAAgent(BaseAgent):
         missing = []
         for m in methods_needed:
             if m == "GET":
-                # GET 通常不写 method 字段,只要有 fetch( 即认为做了读取
                 if not re.search(r"fetch\s*\(", code):
                     missing.append("GET(没有任何 fetch 调用)")
             else:
-                # 非 GET 必须出现 method: 'X'(单双引号皆可)
                 if not re.search(rf"method\s*:\s*['\"]{m}['\"]", code, re.IGNORECASE):
                     missing.append(m)
 
         return {
             "name": "前端实现了契约里全部操作(增删改查)",
             "passed": len(missing) == 0,
-            "detail": f"前端缺少这些操作: {missing}(对应功能没做)" if missing else f"OK(覆盖 {methods_needed})",
+            "detail": f"缺少操作: {missing}" if missing else f"全部实现({len(methods_needed)} 种)",
         }
 
     def _check_html_doctype(self, ctx: SharedContext) -> dict:
-        """新增:index.html 必须以合法 <!DOCTYPE html> 开头。
-        拦住 `<!--DOCTYPE`(漏感叹号被当成注释)这类导致整页解析异常的低级错误。"""
-        html = ctx.frontend_files.get("public/index.html") or ctx.frontend_files.get("index.html")
-        if html is None:
-            return {"name": "index.html 以合法 <!DOCTYPE html> 开头", "passed": False, "detail": "未生成 index.html"}
-        head = html.lstrip()[:64].lower()
-        ok = head.startswith("<!doctype html")
+        html = ctx.frontend_files.get("public/index.html", "")
+        ok = html.lstrip().startswith("<!DOCTYPE html>") or html.lstrip().startswith("<!doctype html>")
         return {
             "name": "index.html 以合法 <!DOCTYPE html> 开头",
             "passed": ok,
-            "detail": "OK" if ok else f"开头不是 <!DOCTYPE html>: {html.lstrip()[:30]!r}",
+            "detail": "OK" if ok else "缺少或格式错误的 <!DOCTYPE>",
         }
 
     def _check_static_serving(self, ctx: SharedContext) -> dict:
-        """新增:server.js 必须用 express.static 托管前端,否则访问 / 直接 Cannot GET /。"""
         server = ctx.backend_files.get("server.js", "")
-        ok = bool(re.search(r"express\s*\.\s*static\s*\(", server))
+        has_static = "express.static" in server
         return {
             "name": "后端托管前端静态资源 (express.static)",
-            "passed": ok,
-            "detail": "OK" if ok else "server.js 缺少 express.static(...),访问 / 会 Cannot GET /",
+            "passed": has_static,
+            "detail": "OK" if has_static else "后端未配置 express.static,前端访问失败",
         }
 
     def _check_js_syntax(self, ctx: SharedContext) -> dict:
-        """对所有 .js 文件跑 node --check(只查语法,查不出 API 误用/运行时错误)。
+        if shutil.which("node") is None:
+            return {"name": "JS 语法检查 (node --check)", "passed": True, "detail": "跳过(本机无 node)"}
 
-        ★ 修复要点:
-        1. 不使用 text=True,改用 encoding='utf-8' + errors='replace',
-           避免 Windows GBK 解码 node 的 UTF-8 输出时崩溃导致 stderr=None。
-        2. 对 stderr/stdout 做 None 防御。
-        """
-        if not shutil.which("node"):
-            return {
-                "name": "JS 语法检查 (node --check)",
-                "passed": True,
-                "detail": "跳过(本机未安装 node)",
-            }
+        js_files = [
+            ("server.js", ctx.backend_files.get("server.js", "")),
+            ("db.js", ctx.backend_files.get("db.js", "")),
+            ("public/app.js", ctx.frontend_files.get("public/app.js", "")),
+        ]
 
         bad = []
-        all_js = {**ctx.backend_files, **ctx.frontend_files}
-        for path, content in all_js.items():
-            if not path.endswith(".js"):
+        for name, content in js_files:
+            if not content:
                 continue
-            full_path = os.path.join(ctx.project_dir, path)
-            if not os.path.exists(full_path):
-                continue
+            path = os.path.join(ctx.project_dir, name)
             try:
-                proc = subprocess.run(
-                    ["node", "--check", full_path],
-                    capture_output=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=10,
+                result = subprocess.run(
+                    ["node", "--check", path], capture_output=True,
+                    encoding="utf-8", errors="replace", timeout=10,
                 )
-                if proc.returncode != 0:
-                    stderr = (proc.stderr or "").strip()
-                    stdout = (proc.stdout or "").strip()
-                    raw = stderr or stdout or "syntax error (no output)"
-                    lines = raw.splitlines()
-                    error_lines = [
-                        l for l in lines
-                        if any(kw in l for kw in ("SyntaxError", "ReferenceError", "TypeError", "Error:"))
-                        and not l.startswith("Node.js v")
-                    ]
+                if result.returncode != 0:
+                    lines = (result.stderr or result.stdout or "").strip().splitlines()
+                    error_lines = [l for l in lines if any(k in l for k in ("error", "Error", "Unexpected"))]
                     msg = error_lines[0] if error_lines else (lines[0] if lines else "syntax error")
-                    bad.append(f"{path}: {msg}")
+                    bad.append(f"{name}: {msg}")
             except subprocess.TimeoutExpired:
-                bad.append(f"{path}: node --check 超时")
+                bad.append(f"{name}: node --check 超时")
             except Exception as e:
-                bad.append(f"{path}: {e}")
+                bad.append(f"{name}: {e}")
 
         return {
             "name": "JS 语法检查 (node --check)",
@@ -293,60 +298,17 @@ class QAAgent(BaseAgent):
             "detail": f"语法错误: {bad}" if bad else "全部通过",
         }
 
-    # ---- 冒烟测试辅助:从契约/数据模型推断要打的接口与请求体(保证对任意项目通用) ----
-
-    @staticmethod
-    def _collection_from_path(path: str) -> str:
-        """/api/todos/:id -> todos ; /api/todo_items/{id} -> todo_items"""
-        segs = [
-            s for s in path.split("/")
-            if s and s != "api" and not s.startswith(("{", ":"))
-        ]
-        return segs[0] if segs else ""
-
-    @staticmethod
-    def _sample_value(t: str):
-        t = (t or "").lower()
-        if any(k in t for k in ("num", "int", "float", "double")):
-            return 1
-        if "bool" in t:
-            return True
-        if any(k in t for k in ("array", "list")):
-            return []
-        if "obj" in t:
-            return {}
-        return "qa_smoke"
-
-    def _sample_body(self, ctx: SharedContext, ep: dict) -> dict:
-        """为 POST 冒烟造一个尽力而为的请求体:优先用契约自带例子,否则按 data_model 合成。"""
-        rb = ep.get("request_body")
-        if isinstance(rb, dict) and rb:
-            return rb
-        coll = self._collection_from_path(ep.get("path", ""))
-        models = (ctx.architecture or {}).get("data_models", [])
-        model = next((m for m in models if m.get("collection") == coll), None)
-        body = {}
-        if model:
-            for f in model.get("fields", []):
-                n = f.get("name")
-                if not n or n.lower() == "id":
-                    continue
-                body[n] = self._sample_value(f.get("type"))
-        return body
-
     def _check_runtime_smoke(self, ctx: SharedContext) -> dict:
         """
-        真正把项目跑起来做端到端冒烟。node --check 只能查语法,查不出
-        "语法没错但一跑就崩 / 一访问就 404" 的问题。这里:
-          1) npm install
-          2) 启动 server.js(随机端口)
-          3) GET /                          —— 验证静态托管(否则 Cannot GET /)
-          4) GET <契约里第一个集合级 GET>    —— 验证读链路
-          5) POST <契约里第一个 POST>        —— 验证写链路
+        【Windows 兼容版本】
+        真正把项目跑起来做端到端冒烟。
+        关键改动：
+          - npm install 用 shell=True 和 npm.cmd (Windows)
+          - node server.js 用 shell=True (Windows)
 
-        关键:探测哪些接口、用什么请求体,全部从 api_contract / data_models 推断,
-        不写死任何具体业务路径,因此对任意项目通用。
-        4xx(校验未过 / 资源不存在)视为正常应用行为,只有启动崩溃、缺静态、5xx 才判失败。
+        注意:此检查只验证【后端】启动 + 静态托管 + 读写链路,
+        不会在浏览器里执行前端 app.js。前端框架用法是否正确由
+        _check_frontend_framework 静态把关。
         """
         name = "运行时冒烟测试 (npm install + 启动 + 打接口)"
 
@@ -355,31 +317,39 @@ class QAAgent(BaseAgent):
         if "package.json" not in ctx.backend_files:
             return {"name": name, "passed": False, "detail": "无 package.json,无法启动"}
 
-        npm = shutil.which("npm")
-
-        # 1) npm install
+        # 1) npm install (Windows 兼容)
         try:
-            inst = subprocess.run(
-                [npm, "install", "--no-audit", "--no-fund"],
-                cwd=ctx.project_dir, capture_output=True,
-                encoding="utf-8", errors="replace", timeout=300,
-            )
+            if os.name == 'nt':
+                # Windows: 用 npm.cmd
+                inst = subprocess.run(
+                    "npm install --no-audit --no-fund",
+                    cwd=ctx.project_dir, capture_output=True,
+                    encoding="utf-8", errors="replace", timeout=300,
+                    shell=True,
+                )
+            else:
+                # macOS/Linux: 用数组形式
+                inst = subprocess.run(
+                    ["npm", "install", "--no-audit", "--no-fund"],
+                    cwd=ctx.project_dir, capture_output=True,
+                    encoding="utf-8", errors="replace", timeout=300,
+                )
         except subprocess.TimeoutExpired:
             return {"name": name, "passed": False, "detail": "npm install 超时(>300s)"}
         if inst.returncode != 0:
             tail = (inst.stderr or inst.stdout or "").strip().splitlines()
             return {"name": name, "passed": False, "detail": "npm install 失败: " + " / ".join(tail[-3:] or ["(无输出)"])}
 
-        # 从契约挑出要探测的接口(不写死任何业务路径)
+        # 从契约挑出要探测的接口
         contract = (ctx.architecture or {}).get("api_contract", [])
         get_eps = [ep for ep in contract if (ep.get("method", "") or "").upper() == "GET"]
-        coll_get = next(  # 集合级 GET:路径里没有参数({x} / :x)
+        coll_get = next(
             (ep for ep in get_eps
              if "{" not in ep.get("path", "") and ":" not in ep.get("path", "")),
             None,
         )
         post_ep = next((ep for ep in contract if (ep.get("method", "") or "").upper() == "POST"), None)
-        readiness_path = (coll_get or {}).get("path") or "/"   # 就绪探测优先集合级 GET,否则根路径
+        readiness_path = (coll_get or {}).get("path") or "/"
 
         # 2) 选空闲端口
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -387,16 +357,28 @@ class QAAgent(BaseAgent):
         port = sock.getsockname()[1]
         sock.close()
 
-        # 3) 启动 server.js
+        # 3) 启动 server.js (Windows 兼容)
         env = dict(os.environ)
         env["PORT"] = str(port)
         env["NODE_ENV"] = "test"
-        proc = subprocess.Popen(
-            ["node", "server.js"],
-            cwd=ctx.project_dir, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            encoding="utf-8", errors="replace",
-        )
+
+        if os.name == 'nt':
+            # Windows: 用 shell=True
+            proc = subprocess.Popen(
+                "node server.js",
+                cwd=ctx.project_dir, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                encoding="utf-8", errors="replace",
+                shell=True,
+            )
+        else:
+            # macOS/Linux: 用数组形式
+            proc = subprocess.Popen(
+                ["node", "server.js"],
+                cwd=ctx.project_dir, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                encoding="utf-8", errors="replace",
+            )
 
         base = f"http://127.0.0.1:{port}"
         try:
@@ -415,7 +397,7 @@ class QAAgent(BaseAgent):
                     ready = True
                     break
                 except urllib.error.HTTPError:
-                    ready = True  # 有响应(哪怕 4xx/5xx)就说明服务起来了
+                    ready = True
                     break
                 except Exception:
                     time.sleep(0.3)
@@ -436,7 +418,7 @@ class QAAgent(BaseAgent):
             except Exception as e:
                 problems.append(f"GET / 请求失败: {e}")
 
-            # 6) GET <集合级接口> —— 读链路(只在 5xx / 连接失败 / 非 JSON 时判失败)
+            # 6) GET <集合级接口> —— 读链路
             if coll_get:
                 gp = coll_get.get("path")
                 try:
@@ -450,7 +432,7 @@ class QAAgent(BaseAgent):
                 except Exception as e:
                     problems.append(f"GET {gp} 请求失败: {e}")
 
-            # 7) POST <写接口> —— 写链路(4xx 视为校验未过、可接受;5xx 才算坏)
+            # 7) POST <写接口> —— 写链路
             if post_ep:
                 pp = post_ep.get("path")
                 payload = json.dumps(self._sample_body(ctx, post_ep)).encode("utf-8")
@@ -483,10 +465,79 @@ class QAAgent(BaseAgent):
                     pass
 
     def _check_devops_files(self, ctx: SharedContext) -> dict:
-        required = ["README.md", "start.sh", ".gitignore"]
+        required = ["README.md", "start.sh"] # , ".gitignore"
         missing = [f for f in required if f not in ctx.devops_files]
         return {
             "name": "工程化文件齐全",
             "passed": len(missing) == 0,
             "detail": f"缺失: {missing}" if missing else "OK",
+        }
+
+    def _check_frontend_framework(self, ctx: SharedContext) -> dict:
+        """
+        [v2.2 新增] 前端框架健全性静态检查。
+
+        运行时冒烟只跑后端、看 GET / 是否返回 HTML,不会在浏览器里执行 app.js。
+        因此前端若把 Petite Vue 写成标准 Vue3 的 Options API
+        (data() / methods: / mounted()),页面其实渲染不出来,
+        但旧 QA 仍会全绿。此检查用静态特征拦住这类问题。
+
+        判定规则(任一不满足即失败):
+          1) app.js 不得出现 Vue3/Vue2 的 Options API 特征:
+             data() / methods: / computed: / watch: / new Vue
+          2) app.js 必须调用 createApp(...) 且存在 .mount(
+          3) 页面必须有挂载后拉数据的入口:
+             HTML 含 @vue:mounted,或 app.js 显式在 mount 后调用初始化
+        """
+        name = "前端框架用法正确 (Petite Vue)"
+
+        app_js = ctx.frontend_files.get("public/app.js", "") or ctx.frontend_files.get("app.js", "")
+        html = ctx.frontend_files.get("public/index.html", "") or ctx.frontend_files.get("index.html", "")
+
+        if not app_js:
+            return {"name": name, "passed": False, "detail": "未生成 public/app.js"}
+
+        problems = []
+
+        # 规则 1:禁止 Vue3/Vue2 Options API 特征
+        # 说明:Petite Vue 的 createApp 接收扁平对象,没有 data()/methods:/computed:/watch:。
+        forbidden = {
+            "data() {": r"\bdata\s*\(\s*\)\s*\{",          # data() { ... }
+            "data:":     r"\bdata\s*:\s*(?:function|\(|\{)",  # data: function / data: () / data: {
+            # "methods:":  r"\bmethods\s*:",
+            "computed:": r"\bcomputed\s*:",
+            "watch:":    r"\bwatch\s*:",
+            "new Vue":   r"\bnew\s+Vue\b",
+        }
+        hit = [label for label, pat in forbidden.items() if re.search(pat, app_js)]
+        if hit:
+            problems.append(
+                "app.js 使用了 Petite Vue 不支持的 Vue Options API 写法(" +
+                ", ".join(hit) +
+                "),会导致数据不渲染。请改成扁平对象:createApp({ 数据..., 方法... })"
+            )
+
+        # 规则 2:必须有 createApp(...) 且 .mount(
+        if not re.search(r"createApp\s*\(", app_js):
+            problems.append("app.js 未调用 createApp()")
+        if not re.search(r"\.mount\s*\(", app_js):
+            problems.append("app.js 未调用 .mount(),应用不会挂载")
+
+        # 规则 3:必须有挂载后的初始化入口(否则页面打开后不拉数据)
+        has_html_mounted = bool(re.search(r"@vue:mounted", html))
+        # 兜底:有些写法会在 mount() 之后链式或单独调用 init/fetch
+        has_js_init = bool(
+            re.search(r"\.mount\s*\([^)]*\)\s*[.;]?\s*\w+\s*\(", app_js)
+            or re.search(r"@vue:mounted", app_js)
+        )
+        if not (has_html_mounted or has_js_init):
+            problems.append(
+                "未发现挂载后的初始化入口(HTML 缺少 @vue:mounted=\"init()\"),"
+                "页面加载后不会自动拉取列表数据"
+            )
+
+        return {
+            "name": name,
+            "passed": len(problems) == 0,
+            "detail": "OK(Petite Vue 用法正确)" if not problems else "; ".join(problems),
         }

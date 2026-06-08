@@ -10,28 +10,32 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 列表
+// 列表(若 api_contract 该接口声明了 query_params,用 req.query 实现筛选)
 app.get('/api/todos', (req, res) => {
-  res.json(load().todos);
+  let items = load().todos;
+  const { status } = req.query;
+  if (status === 'active')    items = items.filter(x => !x.completed);
+  else if (status === 'completed') items = items.filter(x => x.completed);
+  res.json(items);
 });
 
-// 新建(按 data_model 取请求体字段,做必要校验,布尔/数字直接用原生类型)
+// 新建(按 data_model 取请求体字段,做必要校验)
 app.post('/api/todos', (req, res) => {
   const body = req.body || {};
   if (!body.title) return res.status(400).json({ error: 'title 不能为空' });
   const data = load();
-  const item = { id: ++data.seq, ...body };   // 也可显式列字段并给默认值
+  const item = { id: ++data.seq, ...body };   
   data.todos.push(item);
   save(data);
   res.status(201).json(item);
 });
 
 // 更新(注意 Number():URL 参数是字符串)
-app.put('/api/todos/:id', (req, res) => {
+app.put('/api/todos/:id/complete', (req, res) => {
   const data = load();
   const item = data.todos.find(x => x.id === Number(req.params.id));
   if (!item) return res.status(404).json({ error: '不存在' });
-  Object.assign(item, req.body || {});
+  item.completed = true;
   save(data);
   res.json(item);
 });
